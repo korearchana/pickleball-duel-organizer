@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="description" content="Fair pickleball rotation planner with staggered arrivals and departures.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Pickleball Duel Organizer</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f5f7fb}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:900px;margin:auto;padding:20px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+h1{font-size:24px;margin:0}.sub{color:#6b7280;margin:5px 0 0;font-size:14px}
+.card{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+input,textarea{width:100%;font:inherit;font-size:16px;padding:11px;border:1px solid #d1d5db;border-radius:10px;background:white}
+textarea{min-height:150px;resize:vertical}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:11px 15px;min-height:44px;cursor:pointer}
+.primary{background:#2563eb;color:#fff}.secondary{background:#eef2f7;color:#111827}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.notice{background:#eff6ff;border:1px solid #bfdbfe;padding:11px;border-radius:10px;font-size:14px;margin-top:12px}
+.warn{background:#fff7ed;border-color:#fed7aa}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.stat{background:#f8fafc;border-radius:10px;padding:10px}.stat small{display:block;color:#6b7280}.stat b{font-size:20px}
+.round{border:1px solid #e5e7eb;border-radius:13px;padding:12px;margin-top:10px}
+.roundhead{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.court{margin-top:9px}.players{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:6px}
+.player{padding:9px;background:#f3f4f6;border-radius:8px;text-align:center;font-size:14px}
+.timeline{display:grid;grid-template-columns:repeat(9,minmax(75px,1fr));overflow-x:auto;gap:4px;margin-top:10px}
+.tslot{min-width:75px;border:1px solid #e5e7eb;border-radius:8px;padding:6px}.tslot strong{font-size:12px}.tslot div{font-size:12px;margin-top:5px}
+.person{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid #eee}
+.person:last-child{border-bottom:0}.badge{font-size:12px;background:#eef2ff;border-radius:999px;padding:4px 7px;white-space:nowrap}
+.small{font-size:12px;color:#6b7280}
+.install{display:none;background:#111827;color:white}
+@media(max-width:650px){.grid{grid-template-columns:1fr 1fr}.stats{grid-template-columns:1fr 1fr}.players{grid-template-columns:1fr 1fr}}
+@media(max-width:430px){.grid{grid-template-columns:1fr}.wrap{padding:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div><h1>🏓 Pickleball Duel Organizer</h1><div class="sub">Fair games • staggered arrivals • early departures</div></div>
+  <button id="install" class="install">Install app</button>
+</header>
+
+<section class="card">
+  <div class="grid">
+    <div><label>Reservation (minutes)</label><input id="duration" type="number" min="20" max="720" value="180"></div>
+    <div><label>Game length (minutes)</label><input id="gameLength" type="number" min="5" max="120" value="20"></div>
+    <div><label>Courts</label><input id="courts" type="number" min="1" max="20" value="1"></div>
+  </div>
+  <div class="grid" style="margin-top:12px">
+    <div><label>Maximum time at court per person (minutes)</label><input id="maxStay" type="number" min="20" max="720" value="120"></div>
+    <div><label>Start time (optional)</label><input id="startTime" type="time" value="18:00"></div>
+    <div><label>Minimum games per person</label><input id="minGames" type="number" min="1" max="100" value="1"></div>
+  </div>
+  <div style="margin-top:12px">
+    <label>Players — one name per line</label>
+    <textarea id="names" placeholder="Archana&#10;Priya&#10;John&#10;Sarah"></textarea>
+  </div>
+  <div class="actions">
+    <button id="generate" class="primary">Generate fair schedule</button>
+    <button id="clear" class="secondary">Clear</button>
+    <button id="share" class="secondary">Share schedule</button>
+  </div>
+  <div id="message" aria-live="polite"></div>
+</section>
+
+<div id="results"></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $=id=>document.getElementById(id);
+let lastText='';
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function minsToClock(m,start){
+  let [h,mi]=(start||'18:00').split(':').map(Number); let x=h*60+mi+m;
+  x=((x%1440)+1440)%1440; let hh=Math.floor(x/60), mm=x%60, ap=hh>=12?'PM':'AM', h12=hh%12||12;
+  return h12+':'+String(mm).padStart(2,'0')+' '+ap;
+}
+function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a;}
+
+function buildSchedule(){
+  const names=[...new Set($('names').value.split(/\n|,/).map(x=>x.trim()).filter(Boolean))];
+  const duration=Math.max(20,Math.min(720,Number($('duration').value)||180));
+  const len=Math.max(5,Math.min(120,Number($('gameLength').value)||20));
+  const courts=Math.max(1,Math.min(20,Number($('courts').value)||1));
+  const maxStay=Math.max(len,Math.min(duration,Number($('maxStay').value)||120));
+  const minGames=Math.max(1,Math.min(100,Number($('minGames').value)||1));
+  const slots=Math.floor(duration/len);
+  const capacity=courts*4;
+  $('duration').value=duration;$('gameLength').value=len;$('courts').value=courts;$('maxStay').value=maxStay;
+
+  if(names.length<4){$('message').innerHTML='<div class="notice warn">Add at least 4 players.</div>';return null;}
+  if(slots<1){$('message').innerHTML='<div class="notice warn">Reservation is too short for one complete game.</div>';return null;}
+
+  const staySlots=Math.max(1,Math.min(slots,Math.floor(maxStay/len)));
+  const counts=Object.fromEntries(names.map(n=>[n,0]));
+  const attendance=Object.fromEntries(names.map(n=>[n,[]]));
+  const partner=Object.fromEntries(names.map(n=>[n,{}]));
+  const targetTotal=Math.max(names.length*minGames, Math.floor(slots*capacity/names.length)*names.length);
+  const targetEach=Math.max(minGames,Math.floor((slots*capacity)/names.length));
+  const starts={};
+
+  // Spread 2-hour attendance windows across the 3-hour reservation.
+  const maxStart=Math.max(0,slots-staySlots);
+  names.forEach((n,i)=>{
+    starts[n]=maxStart===0?0:Math.round((i/(Math.max(1,names.length-1)))*maxStart);
+  });
+
+  const games=[];
+  for(let r=0;r<slots;r++){
+    const available=names.filter(n=>r>=starts[n] && r<starts[n]+staySlots);
+    // People with fewer games are prioritized. Small random tie-breaking avoids deterministic repetition.
+    let ranked=available.slice().sort((a,b)=>counts[a]-counts[b] || (Object.keys(partner[a]).length-Object.keys(partner[b]).length) || Math.random()-0.5);
+    // Prefer people below target first.
+    ranked.sort((a,b)=>(counts[a]>=targetEach)-(counts[b]>=targetEach) || counts[a]-counts[b] || Math.random()-0.5);
+    let pool=ranked.filter(n=>counts[n]<targetEach);
+    if(pool.length<capacity) pool=ranked;
+    pool=pool.slice(0,capacity);
+
+    // Fill courts. If the window design temporarily leaves too few players, use lowest-count available people.
+    if(pool.length<capacity){
+      pool=ranked.slice(0,capacity);
+    }
+    for(let c=0;c<courts;c++){
+      const group=pool.splice(0,4);
+      if(group.length<4) break;
+      group.forEach(n=>{counts[n]++;attendance[n].push(r);});
+      for(let i=0;i<4;i++)for(let j=i+1;j<4;j++){
+        partner[group[i]][group[j]]=(partner[group[i]][group[j]]||0)+1;
+        partner[group[j]][group[i]]=(partner[group[j]][group[i]]||0)+1;
+      }
+      games.push({round:r+1,court:c+1,group});
+    }
+  }
+
+  // If some players missed the minimum, report it honestly rather than pretending.
+  const minCount=Math.min(...Object.values(counts));
+  const maxCount=Math.max(...Object.values(counts));
+  const actualMaxStay=Math.max(...names.map(n=>{
+    const a=attendance[n]; return a.length? (Math.max(...a)-Math.min(...a)+1)*len:0;
+  }));
+  return {names,duration,len,courts,maxStay,slots,capacity,staySlots,starts,counts,attendance,games,minCount,maxCount,actualMaxStay,start:$('startTime').value};
+}
+
+function render(s){
+  if(!s)return;
+  const avg=(s.games.length*4/s.names.length).toFixed(1);
+  const rounds=s.games.length?s.games.length/s.courts:0;
+  const below=s.names.filter(n=>s.counts[n]<1);
+  let html='<section class="card">';
+  html+='<div class="stats"><div class="stat"><small>Players</small><b>'+s.names.length+'</b></div><div class="stat"><small>Rounds</small><b>'+Math.round(rounds)+'</b></div><div class="stat"><small>Play/player</small><b>'+s.minCount+'–'+s.maxCount+'</b></div><div class="stat"><small>Avg games</small><b>'+avg+'</b></div></div>';
+  html+='<div class="notice">Each person is assigned a maximum '+s.maxStay+'-minute attendance window. They can arrive at their listed time and leave after their last scheduled game.</div>';
+  if(s.names.length>s.capacity) html+='<div class="notice warn">There are '+s.names.length+' players but only '+s.capacity+' player spots per round. The app staggers attendance windows and balances games as closely as possible.</div>';
+  html+='<h2 style="font-size:18px;margin:16px 0 6px">Who comes when</h2>';
+  const sorted=s.names.slice().sort((a,b)=>s.starts[a]-s.starts[b]||a.localeCompare(b));
+  sorted.forEach(n=>{
+    const a=s.attendance[n];
+    if(!a.length){html+='<div class="person"><span><b>'+esc(n)+'</b><br><span class="small">No game assigned</span></span></div>';return;}
+    const first=Math.min(...a), last=Math.max(...a);
+    html+='<div class="person"><span><b>'+esc(n)+'</b><br><span class="small">Arrive '+minsToClock(first*s.len,s.start)+' • Leave '+minsToClock((last+1)*s.len,s.start)+'</span></span><span class="badge">'+a.length+' game'+(a.length===1?'':'s')+' • '+(a.length*s.len)+' min play</span></div>';
+  });
+  html+='<h2 style="font-size:18px;margin:18px 0 6px">Game-by-game schedule</h2>';
+  for(let r=1;r<=s.slots;r++){
+    const rg=s.games.filter(g=>g.round===r);
+    if(!rg.length)continue;
+    html+='<div class="round"><div class="roundhead"><b>Round '+r+'</b><span class="small">'+minsToClock((r-1)*s.len,s.start)+' – '+minsToClock(r*s.len,s.start)+'</span></div>';
+    rg.forEach(g=>{html+='<div class="court"><span class="small">Court '+g.court+'</span><div class="players">'+g.group.map(n=>'<div class="player">'+esc(n)+'</div>').join('')+'</div></div>';});
+    html+='</div>';
+  }
+  html+='<h2 style="font-size:18px;margin:18px 0 6px">Play count</h2>';
+  s.names.slice().sort((a,b)=>s.counts[b]-s.counts[a]||a.localeCompare(b)).forEach(n=>{
+    html+='<div class="person"><span>'+esc(n)+'</span><b>'+s.counts[n]+' game'+(s.counts[n]===1?'':'s')+'</b></div>';
+  });
+  html+='</section>';
+  $('results').innerHTML=html;
+
+  lastText='Pickleball Schedule\\n\\n'+sorted.map(n=>{
+    const a=s.attendance[n]; if(!a.length)return n+': no game assigned';
+    const first=Math.min(...a),last=Math.max(...a);
+    return n+': arrive '+minsToClock(first*s.len,s.start)+', leave '+minsToClock((last+1)*s.len,s.start)+', '+a.length+' games';
+  }).join('\\n')+'\\n\\nGames:\\n'+s.games.map(g=>'Round '+g.round+' Court '+g.court+': '+g.group.join(', ')).join('\\n');
+}
+$('generate').addEventListener('click',()=>render(buildSchedule()));
+$('clear').addEventListener('click',()=>{$('names').value='';$('results').innerHTML='';$('message').innerHTML='';});
+$('share').addEventListener('click',async()=>{
+  if(!lastText){$('message').innerHTML='<div class="notice">Generate a schedule first.</div>';return;}
+  if(navigator.share){try{await navigator.share({title:'Pickleball Schedule',text:lastText});}catch(e){}}
+  else {window.prompt('Copy this schedule:',lastText);}
+});
+let deferred;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('install').style.display='block';});
+$('install').addEventListener('click',async()=>{if(deferred){deferred.prompt();deferred=null;}});
+if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+render(buildSchedule());
+})();
+</script>
+</body>
+</html>
